@@ -1,4 +1,4 @@
-# supervisor
+# podman-supervisord
 
 **1 container Debian chạy systemd làm PID 1.** Service quản bằng `systemctl`,
 cloudflared chạy trong cùng container.
@@ -29,7 +29,7 @@ Không bỏ bước kiểm tra.
 
 1. Mọi lệnh chạy bằng **root** (`sudo -i` hoặc thêm `sudo`). Đây là podman
    **rootful**, không phải rootless, không phải docker.
-2. Chạy lệnh trong thư mục repo (vd `/home/thepodman/docker-systemd`).
+2. Chạy lệnh trong thư mục repo (vd `/home/thepodman/podman-supervisord`).
 3. **Không** sửa `/etc/containers/systemd/supervisor.container`: file này do
    `deploy.sh` sinh ra từ `quadlet/supervisor.container.in`, sửa tay sẽ bị ghi đè.
 4. **Không** in, log, hay commit nội dung `secrets/token` (token Cloudflare).
@@ -57,8 +57,8 @@ Sai thì làm:
 ### Bước 2. Lấy code
 
 ```bash
-git clone https://github.com/khanh97dev/docker-systemd.git
-cd docker-systemd
+git clone https://github.com/khanh97dev/podman-supervisord.git
+cd podman-supervisord
 ```
 
 Đã có repo thì `git pull`.
