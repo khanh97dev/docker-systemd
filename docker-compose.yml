@@ -36,6 +36,9 @@ services:
       # KHÔNG :ro -> `cloudflared service install <TOKEN>` trong container ghi được
       # token, và token đó rơi ra ./secrets/token trên host nên sống qua rebuild.
       - ./secrets:/etc/cloudflared
+      # Config + mật khẩu code-server. Nằm trong secrets/ (gitignored) nên sống
+      # qua rebuild; không mount thì mỗi lần build lại là một mật khẩu mới.
+      - ./secrets/code-server:/root/.config/code-server
 
     # systemd LÀ init -> không dùng docker-init, và shutdown bằng SIGRTMIN+3
     init: false

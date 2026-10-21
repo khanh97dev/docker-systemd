@@ -1,0 +1,25 @@
+# code-server (VS Code trong browser), chạy như unit systemd trong container.
+# Cấu hình + mật khẩu nằm ở /root/.config/code-server/config.yaml, được mount
+# từ ./secrets/code-server (xem docker-compose.yml / supervisor.container) nên
+# sống qua rebuild. Đọc mật khẩu:
+#   docker exec supervisor cat /root/.config/code-server/config.yaml
+#
+# Bind 0.0.0.0:8080 trong container: chỉ cloudflared (cùng container) và các
+# container khác join appnet gọi được; port 8080 KHÔNG publish ra host.
+[Unit]
+Description=code-server (VS Code in browser)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/root
+WorkingDirectory=/root
+ExecStart=/usr/bin/code-server --bind-addr 0.0.0.0:8080
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

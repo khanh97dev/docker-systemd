@@ -3,6 +3,7 @@ FROM debian:13-slim
 ARG TARGETARCH
 ARG CLOUDFLARED_VERSION=2026.10.2
 ARG OPENCODE_VERSION=2.1.1
+ARG CODE_SERVER_VERSION=4.141.0
 ARG DEBIAN_FRONTEND=noninteractive
 
 # systemd cần biết nó đang trong container
@@ -51,6 +52,23 @@ RUN set -eux; \
     rm -rf /tmp/opencode.tgz /tmp/package; \
     opencode --version
 
+# ---- code-server (VS Code in browser) ----
+# Pin + verify sha256, cùng kiểu cloudflared/opencode ở trên.
+# Cấu hình (/root/.config/code-server) được mount từ ./secrets/code-server để
+# mật khẩu sống qua rebuild; xem units/code-server.service.
+RUN set -eux; \
+    case "${TARGETARCH:-arm64}" in \
+      arm64) SHA=0bca33a9b01180ad88f0b8969a8e34ae1c76417df471697e7cd65c20ef5dd60d ;; \
+      amd64) SHA=f384beb4f3ba207e0bca27d0dbd36dd825d5aa909d78c6d4baa8703eaf6b77ba ;; \
+      *) echo "arch không hỗ trợ: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/code-server.deb \
+      "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_${TARGETARCH:-arm64}.deb"; \
+    echo "${SHA}  /tmp/code-server.deb" | sha256sum -c -; \
+    dpkg -i /tmp/code-server.deb; \
+    rm -f /tmp/code-server.deb; \
+    code-server --version
+
 # ---- Mask unit không chạy được / không cần trong container ----
 # Không mask -> systemd báo "degraded" vì các unit này fail.
 RUN systemctl mask \
@@ -72,10 +90,11 @@ RUN chmod +x /usr/local/sbin/*.sh
 # sshd host keys (bỏ dòng này nếu không cần ssh)
 RUN ssh-keygen -A
 
-# Bật service. cloudflared KHÔNG enable sẵn - cần token trước (xem README).
-RUN systemctl enable ssh.service cron.service app.service
+# Bật service. cloudflared cũng enable: unit có ConditionFileNotEmpty nên nếu
+# chưa có ./secrets/token thì bị skip sạch, không tính failed. Có token là tự lên.
+RUN systemctl enable ssh.service cron.service app.service code-server.service cloudflared.service
 
-EXPOSE 22
+EXPOSE 22 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD /usr/local/sbin/healthcheck.sh

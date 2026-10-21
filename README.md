@@ -12,11 +12,12 @@ cloudflared chạy trong cùng container.
 | Restart policy | `always` |
 | privileged | **không** (chỉ `SYS_ADMIN` + `apparmor=unconfined`) |
 | Network | `appnet` — `172.28.0.0/24` |
-| IP tĩnh | `172.28.0.10` |
+| IP tĩnh | `172.28.0.11` |
 | Port | `2222 -> 22` (sshd) |
 | cloudflared | 2026.10.2, `.deb` chính thức, pin + verify sha256 |
 | opencode | v2.1.1 (npm registry), pin + verify sha256 |
-| Service sẵn | `ssh`, `cron`, `app` (enabled) · `cloudflared` (cần token) |
+| code-server | 4.141.0, `.deb` chính thức, pin + verify sha256 — `0.0.0.0:8080` |
+| Service sẵn | `ssh`, `cron`, `app`, `code-server` (enabled) · `cloudflared` (enable sẵn, có `ConditionFileNotEmpty=/etc/cloudflared/token` nên chưa có token thì unit bị skip, không fail) |
 
 ## Lệnh
 
@@ -96,8 +97,9 @@ WantedBy=multi-user.target
 
 ## cloudflared
 
-Binary trong image, chạy như unit systemd trong **cùng container**. Chưa enable
-sẵn vì cần token trước.
+Binary trong image, chạy như unit systemd trong **cùng container**. Unit được
+`enable` sẵn; token phải ở `./secrets/token` (mount vào `/etc/cloudflared/token`),
+không có/nhập nội dung rỗng thì unit bị skip sạch (không fail).
 
 `./secrets` được mount **read-write** vào `/etc/cloudflared`, nên cả hai cách đều được.
 
@@ -106,6 +108,8 @@ Cách A — ghi token từ host:
 ```bash
 printf '%s' '<TUNNEL_TOKEN>' > secrets/token
 chmod 600 secrets/token
+mkdir -p secrets/code-server
+systemctl --user restart supervisor.service
 docker exec supervisor systemctl enable --now cloudflared
 ```
 
