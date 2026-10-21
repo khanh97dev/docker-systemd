@@ -101,6 +101,20 @@ echo ">> $NET = $APPNET_SUBNET, supervisor = $SUPERVISOR_IP"
 
 mkdir -p secrets/code-server "$QUADLET_DIR"
 
+# code-server: chua co config thi tao mac dinh voi mat khau 123 (doi trong
+# secrets/code-server/config.yaml). Da co thi giu nguyen.
+CS_CONFIG=secrets/code-server/config.yaml
+if [ ! -s "$CS_CONFIG" ]; then
+  echo ">> tao $CS_CONFIG (password mac dinh: 123)"
+  cat >"$CS_CONFIG" <<'EOF'
+bind-addr: 0.0.0.0:8080
+auth: password
+password: "123"
+cert: false
+EOF
+  chmod 600 "$CS_CONFIG"
+fi
+
 echo ">> render Quadlet -> $QUADLET"
 sed -e "s|@NET@|$NET|g" -e "s|@IP@|$SUPERVISOR_IP|g" \
     -e "s|@SUBNET@|$APPNET_SUBNET|g" -e "s|@REPO@|$REPO|g" \
