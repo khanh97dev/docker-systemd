@@ -14,7 +14,7 @@ cloudflared chạy trong cùng container.
 | Runtime | **rootless podman** (Quadlet + `loginctl enable-linger`) |
 | Network | `appnet` — subnet `/24` **random** trong `172.16.0.0/12` lúc init |
 | IP tĩnh | random trong `.2`-`.127` của subnet đó |
-| Port | `2222 -> 22` (sshd) |
+| Port | không publish ra host — truy cập qua cloudflared hoặc `podman exec` |
 | cloudflared | 2026.10.2, `.deb` chính thức, pin + verify sha256 |
 | opencode | v2.1.1 (npm registry), pin + verify sha256 |
 | code-server | 4.141.0, `.deb` chính thức, pin + verify sha256 — `0.0.0.0:8080` |
@@ -174,7 +174,8 @@ podman inspect supervisor --format '{{(index .NetworkSettings.Networks "appnet")
 
 > Rootless không tạo bridge trên host: IP này chỉ gọi được từ container khác
 > (cùng user) join `appnet` (`podman run --network appnet ...`, gọi `supervisor:22`).
-> Từ host/LAN dùng port publish `<host>:2222`.
+> Không publish port ra host: vào từ ngoài qua cloudflared tunnel, hoặc
+> `podman exec -it supervisor bash` trên host.
 
 ## Healthcheck
 

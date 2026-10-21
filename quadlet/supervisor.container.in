@@ -13,7 +13,6 @@ HostName=supervisor
 # IP tinh @IP@ tren network @NET@ (@SUBNET@, dynamic pool .128-.254).
 # Subnet + IP duoc random luc init, xem deploy.sh.
 Network=@NET@:ip=@IP@
-PublishPort=2222:22
 
 Volume=@REPO@/app:/app
 Volume=@REPO@/units:/etc/systemd/system/custom:ro
