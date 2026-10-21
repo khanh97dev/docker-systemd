@@ -96,7 +96,23 @@ IP tren lan: 172.16.7.188
 **Ghi lại IP này.** Lần đầu sẽ có cảnh báo
 `!! LAN_ALLOW rong -> KHONG an container khoi LAN`: bình thường, bước 7 sẽ bật.
 
-Muốn chọn IP thay vì random: `sudo LAN_IP=172.16.7.200 ./deploy.sh`.
+### Chọn IP container (viết tắt)
+
+IP container **luôn** có dạng `172.16.7.<n>`. Người dùng chỉ cần nói số cuối:
+
+| Người dùng nói | Lệnh chạy | IP container |
+|---|---|---|
+| "deploy .199" | `sudo ./deploy.sh .199` | `172.16.7.199` |
+| "deploy 199" | `sudo ./deploy.sh 199` | `172.16.7.199` |
+| "deploy 172.16.7.199" | `sudo ./deploy.sh 172.16.7.199` | `172.16.7.199` |
+| "deploy" (không nói IP) | `sudo ./deploy.sh` | giữ IP cũ; lần đầu random `.180`-`.254` |
+| "đổi IP ngẫu nhiên" | `sudo ./deploy.sh --new-ip` | random `.180`-`.254` |
+
+- `n` phải từ `2` đến `254`, IP phải đang trống. Sai -> script báo `!! ...` và
+  dừng (exit 1), container **không** bị đụng tới.
+- IP khác dải `172.16.7.x` bị từ chối. Đổi dải: `LAN_PREFIX=a.b.c`.
+- **Đổi IP thì phải sửa ingress trên Cloudflare** sang IP mới (bước 6), và
+  domain dùng IP cũ sẽ hỏng cho tới lúc đó.
 
 ### Bước 5. Kiểm tra container
 
@@ -176,7 +192,8 @@ và firewall **giữ nguyên**. Chỉ truyền biến khi muốn **đổi** giá
 
 | Biến / cờ | Mặc định | Ý nghĩa |
 |---|---|---|
-| `LAN_IP` | random `.180`-`.254` (lần đầu), sau đó giữ nguyên | IP LAN của container |
+| tham số 1 / `LAN_IP` | random `.180`-`.254` (lần đầu), sau đó giữ nguyên | IP container: `.199`, `199` hoặc `172.16.7.199` |
+| `LAN_PREFIX` | `172.16.7` | 3 số đầu IP container |
 | `LAN_ALLOW` | rỗng = firewall tắt | IP được gọi vào container (connector cloudflared) |
 | `LAN_PORTS` | `8080` | port mở cho `LAN_ALLOW`, vd `"8080 1111"` |
 | `--new-ip` | | random lại IP (phải sửa ingress Cloudflare sau đó) |
@@ -203,7 +220,9 @@ podman exec supervisor journalctl -u code-server -f
 | domain **530** / `error code: 1016` | hostname bị xoá hoặc DNS sai trên Cloudflare | sửa trên dashboard, không phải lỗi container |
 | domain **530** / `error code: 1033` | không connector nào của tunnel online | kiểm tra cloudflared trên các máy chạy tunnel |
 | `!! can chay bang root` | chạy không có sudo | chạy lại với `sudo` |
-| `!! khong tim duoc IP ...` | dải `.180`-`.254` đã kín | chọn tay `LAN_IP=<ip trống>` |
+| `!! khong tim duoc IP ...` | dải `.180`-`.254` đã kín | chọn tay: `sudo ./deploy.sh .<n trống>` |
+| `!! IP khong hop le` / `khong thuoc 172.16.7.x` | IP gõ sai | dùng dạng `.199`, `199` hoặc `172.16.7.199` |
+| `!! ... dang co may khac dung` | IP đã có máy dùng | chọn số khác |
 | host `curl <IP container>` timeout | macvlan: host không gọi được container | bình thường, test bằng `podman exec` |
 
 ## Yêu cầu để systemd chạy trong container
@@ -334,7 +353,7 @@ gateway/host và IP nào đang trả lời ping/ARP.
 Không có file state: lần chạy sau đọc lại IP từ Quadlet đã render
 (`/etc/containers/systemd/supervisor.container`, `Network=lan:ip=...`), nên IP
 **giữ nguyên** qua mỗi lần deploy. Đổi: `sudo ./deploy.sh --new-ip`, hoặc chọn
-tay `sudo LAN_IP=<ip> ./deploy.sh`. Xem IP hiện tại:
+tay `sudo ./deploy.sh .<n>` (vd `.199`). Xem IP hiện tại:
 
 ```bash
 podman inspect supervisor --format '{{(index .NetworkSettings.Networks "lan").IPAddress}}'

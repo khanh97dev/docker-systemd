@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Build image + (re)start container supervisor bang podman ROOTFUL (Quadlet).
 # Phai chay bang root:
-#   sudo ./deploy.sh                          # lan dau: random IP LAN .180-.254
+#   sudo ./deploy.sh                          # lan dau: random 172.16.7.180-254
+#   sudo ./deploy.sh .199                     # chon IP 172.16.7.199 (= 199 = 172.16.7.199)
 #   sudo ./deploy.sh --new-ip                 # random lai IP
-#   sudo LAN_IP=172.16.7.188 ./deploy.sh      # chon IP thay vi random
+#   sudo LAN_IP=.199 ./deploy.sh              # giong ./deploy.sh .199 (LAN_PREFIX=172.16.7 mac dinh)
 #   sudo LAN_ALLOW="172.16.7.73" ./deploy.sh  # IP connector cloudflared duoc goi vao
 #   sudo LAN_PORTS="8080 1111" ./deploy.sh    # port mo cho LAN_ALLOW (mac dinh 8080)
 # Bien chi can truyen khi muon DOI: lan sau doc lai tu Quadlet da render.
@@ -37,12 +38,36 @@ QUADLET_DIR=/etc/containers/systemd
 QUADLET="$QUADLET_DIR/supervisor.container"
 IP_MIN=180
 IP_MAX=254
+# 3 so dau IP container. ".199" / "199" -> "$LAN_PREFIX.199".
+LAN_PREFIX=${LAN_PREFIX:-172.16.7}
+
+# Tham so: --new-ip, hoac IP (.199 / 199 / 172.16.7.199).
+NEW_IP=
+case "${1:-}" in
+  "") ;;
+  --new-ip) NEW_IP=1 ;;
+  *) LAN_IP=$1 ;;
+esac
+# Viet tat -> IP day du.
+case "${LAN_IP:-}" in
+  "") ;;
+  .*) LAN_IP="$LAN_PREFIX$LAN_IP" ;;
+  *.*) ;;
+  *) LAN_IP="$LAN_PREFIX.$LAN_IP" ;;
+esac
+if [ -n "${LAN_IP:-}" ] && ! [[ "$LAN_IP" =~ ^([0-9]{1,3}\.){3}([0-9]{1,3})$ && ${BASH_REMATCH[2]} -ge 2 && ${BASH_REMATCH[2]} -le 254 ]]; then
+  echo "!! IP khong hop le: $LAN_IP (vd dung: .199, 199, $LAN_PREFIX.199)" >&2
+  exit 1
+fi
+case "${LAN_IP:-}" in
+  ""|"$LAN_PREFIX".*) ;;
+  *) echo "!! $LAN_IP khong thuoc $LAN_PREFIX.x (doi dai: LAN_PREFIX=a.b.c)" >&2; exit 1 ;;
+esac
 
 DEV=$(ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i+1); exit}}')
 GW=$(ip -4 route show default dev "$DEV" | awk '{print $3; exit}')
 SUBNET=$(ip -4 route show dev "$DEV" scope link proto kernel | awk '{print $1; exit}')
 HOST_IP=$(ip -4 -o addr show dev "$DEV" | awk '{split($4, a, "/"); print a[1]; exit}')
-PREFIX=${HOST_IP%.*}
 
 # 0 neu IP dang co may dung (tra loi ping hoac ARP).
 ip_in_use() {
@@ -53,18 +78,23 @@ ip_in_use() {
 random_ip() {
   local i ip
   for i in $(seq 1 50); do
-    ip="$PREFIX.$(shuf -i "$IP_MIN-$IP_MAX" -n 1)"
+    ip="$LAN_PREFIX.$(shuf -i "$IP_MIN-$IP_MAX" -n 1)"
     if [ "$ip" != "$GW" ] && [ "$ip" != "$HOST_IP" ] && ! ip_in_use "$ip"; then
       echo "$ip"
       return 0
     fi
   done
-  echo "!! khong tim duoc IP trong $PREFIX.$IP_MIN-$IP_MAX sau 50 lan thu" >&2
+  echo "!! khong tim duoc IP trong $LAN_PREFIX.$IP_MIN-$IP_MAX sau 50 lan thu" >&2
   exit 1
 }
 
-if [ -z "${LAN_IP:-}" ] && [ "${1:-}" != "--new-ip" ]; then
-  LAN_IP=$(sed -n "s|^Network=$NET:ip=||p" "$QUADLET" 2>/dev/null || true)
+CUR_IP=$(sed -n "s|^Network=$NET:ip=||p" "$QUADLET" 2>/dev/null || true)
+if [ -n "${LAN_IP:-}" ] && [ "$LAN_IP" != "$CUR_IP" ] && ip_in_use "$LAN_IP"; then
+  echo "!! $LAN_IP dang co may khac dung, chon IP khac" >&2
+  exit 1
+fi
+if [ -z "${LAN_IP:-}" ] && [ -z "$NEW_IP" ]; then
+  LAN_IP=$CUR_IP
 fi
 if [ -z "${LAN_IP:-}" ]; then
   # dung container truoc, neu khong IP cu cua no se bi tinh la "dang dung"
