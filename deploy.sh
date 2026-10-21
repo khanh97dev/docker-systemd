@@ -1,103 +1,77 @@
 #!/usr/bin/env bash
-# Build image + (re)start container supervisor bang rootless podman (Quadlet).
-# Chay bang user thuong (vd thepodman), KHONG can root:
-#   ./deploy.sh            # lan dau (chua co network appnet): random subnet/IP 172.x
-#   ./deploy.sh --new-ip   # xoa network appnet, random lai subnet/IP
+# Build image + (re)start container supervisor bang podman ROOTFUL (Quadlet).
+# Phai chay bang root:
+#   sudo ./deploy.sh                      # lan dau: random IP LAN .180-.254
+#   sudo ./deploy.sh --new-ip             # random lai IP
+#   sudo LAN_IP=172.16.7.188 ./deploy.sh  # chon IP co dinh thay vi random
 #
-# Subnet /24 duoc chon ngau nhien trong 172.16.0.0/12 (dai private), bo qua moi
-# dai trung voi route/interface cua host va network podman khac. IP container
-# random trong .2-.127; dynamic pool .128-.254 nen khong bao gio cap trung.
+# Container nam thang tren LAN (macvlan) voi IP that, nen cloudflared o bat ky
+# may nao trong LAN cung goi duoc. Bridge rieng (rootless hay rootful) thi chi
+# may nay thay -> connector cloudflared o may khac goi IP container bi timeout
+# -> Cloudflare tra 502.
+#
+# IP random trong .180-.254 cua dai /24 chua IP host, bo qua IP dang co may
+# tra loi ARP. Khong luu file trang thai: IP doc lai tu Quadlet da render.
+#
+# Luu y macvlan: chinh host KHONG goi duoc IP container (gioi han cua kernel).
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO=$(pwd)
 
-NET=appnet
-SERVICE=supervisor.service
-IMAGE=supervisor:latest
-QUADLET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
-
-export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-# Thieu bien nay podman se bao "no systemd user session available" va roi ve
-# cgroupfs -> build/run that bai voi "Interactive authentication required".
-# Phai GAN DE, khong duoc chi set khi rong: neu login bang `su - thepodman` tu
-# root thi DBUS_SESSION_BUS_ADDRESS da tro san ve /run/user/0/bus cua root.
-if [ -S "$XDG_RUNTIME_DIR/bus" ]; then
-  export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+if [ "$(id -u)" -ne 0 ]; then
+  echo "!! can chay bang root (podman rootful): sudo $0 $*" >&2
+  exit 1
 fi
 
-ip2int() { local IFS=.; read -r a b c d <<<"$1"; echo $(( (a<<24) | (b<<16) | (c<<8) | d )); }
+NET=lan
+SERVICE=supervisor.service
+IMAGE=supervisor:latest
+QUADLET_DIR=/etc/containers/systemd
+QUADLET="$QUADLET_DIR/supervisor.container"
+IP_MIN=180
+IP_MAX=254
 
-# Cac CIDR dang dung: route/interface cua host + network podman (tru $NET).
-used_cidrs() {
-  ip -4 route show | awk '$1 ~ /^[0-9.]+\/[0-9]+$/ {print $1}'
-  ip -4 -o addr show | awk '{print $4}'
-  podman network ls --format '{{.Name}}' | grep -vx "$NET" | while read -r n; do
-    podman network inspect "$n" --format '{{range .Subnets}}{{.Subnet}}{{"\n"}}{{end}}'
-  done | grep -E '^[0-9.]+/[0-9]+$' || true
+DEV=$(ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+GW=$(ip -4 route show default dev "$DEV" | awk '{print $3; exit}')
+SUBNET=$(ip -4 route show dev "$DEV" scope link proto kernel | awk '{print $1; exit}')
+HOST_IP=$(ip -4 -o addr show dev "$DEV" | awk '{split($4, a, "/"); print a[1]; exit}')
+PREFIX=${HOST_IP%.*}
+
+# 0 neu IP dang co may dung (tra loi ping hoac ARP).
+ip_in_use() {
+  ping -c1 -W1 "$1" >/dev/null 2>&1 && return 0
+  ip neigh show "$1" dev "$DEV" | grep -q lladdr
 }
 
-# $1 = a.b.c.0 (/24). Tra 0 neu trung voi bat ky CIDR dang dung nao.
-overlaps() {
-  local lo=$(( $(ip2int "$1") )) hi cidr net len mask nlo nhi
-  hi=$(( lo + 255 ))
-  for cidr in $USED; do
-    net=${cidr%/*} len=${cidr#*/}
-    mask=$(( len == 0 ? 0 : (0xFFFFFFFF << (32 - len)) & 0xFFFFFFFF ))
-    nlo=$(( $(ip2int "$net") & mask ))
-    nhi=$(( nlo | (~mask & 0xFFFFFFFF) ))
-    if (( lo <= nhi && nlo <= hi )); then return 0; fi
-  done
-  return 1
-}
-
-rand() { shuf -i "$1-$2" -n 1; }
-
-random_network() {
-  USED=$(used_cidrs | sort -u)
-  local i base
-  for i in $(seq 1 200); do
-    base="172.$(rand 16 31).$(rand 0 255).0"
-    if ! overlaps "$base"; then
-      APPNET_SUBNET="${base%.0}.0/24"
-      SUPERVISOR_IP="${base%.0}.$(rand 2 127)"
+random_ip() {
+  local i ip
+  for i in $(seq 1 50); do
+    ip="$PREFIX.$(shuf -i "$IP_MIN-$IP_MAX" -n 1)"
+    if [ "$ip" != "$GW" ] && [ "$ip" != "$HOST_IP" ] && ! ip_in_use "$ip"; then
+      echo "$ip"
       return 0
     fi
   done
-  echo "!! khong tim duoc subnet 172.x trong sau 200 lan thu" >&2
+  echo "!! khong tim duoc IP trong $PREFIX.$IP_MIN-$IP_MAX sau 50 lan thu" >&2
   exit 1
 }
 
-QUADLET="$QUADLET_DIR/supervisor.container"
-
-# Khong luu file trang thai: network $NET dang ton tai chinh la nguon su that
-# cho subnet, IP doc lai tu Quadlet da render. Lan init (chua co network) hoac
-# --new-ip thi random moi.
-if [ "${1:-}" = "--new-ip" ] && podman network exists "$NET"; then
-  echo ">> --new-ip: xoa network $NET cu"
-  systemctl --user stop "$SERVICE" 2>/dev/null || true
-  podman rm -f supervisor >/dev/null 2>&1 || true
-  podman network rm "$NET"
+if [ -z "${LAN_IP:-}" ] && [ "${1:-}" != "--new-ip" ]; then
+  LAN_IP=$(sed -n "s|^Network=$NET:ip=||p" "$QUADLET" 2>/dev/null || true)
+fi
+if [ -z "${LAN_IP:-}" ]; then
+  # dung container truoc, neu khong IP cu cua no se bi tinh la "dang dung"
+  systemctl stop "$SERVICE" 2>/dev/null || true
+  LAN_IP=$(random_ip)
+  echo ">> random IP: $LAN_IP"
 fi
 
-if podman network exists "$NET"; then
-  APPNET_SUBNET=$(podman network inspect "$NET" --format '{{range .Subnets}}{{.Subnet}}{{end}}')
-  PREFIX=${APPNET_SUBNET%.0/24}
-  SUPERVISOR_IP=$(sed -n "s|^Network=$NET:ip=||p" "$QUADLET" 2>/dev/null || true)
-  case "$SUPERVISOR_IP" in
-    "$PREFIX".*) ;;
-    *) SUPERVISOR_IP="$PREFIX.$(rand 2 127)" ;;
-  esac
-else
-  random_network
-  PREFIX=${APPNET_SUBNET%.0/24}
-  echo ">> tao network $NET ($APPNET_SUBNET random, dynamic .128-.254)"
-  podman network create \
-    --subnet "$APPNET_SUBNET" \
-    --gateway "$PREFIX.1" \
-    --ip-range "$PREFIX.128/25" \
-    "$NET"
+if ! podman network exists "$NET"; then
+  echo ">> tao macvlan $NET tren $DEV ($SUBNET, gw $GW)"
+  podman network create -d macvlan -o parent="$DEV" \
+    --subnet "$SUBNET" --gateway "$GW" "$NET"
 fi
-echo ">> $NET = $APPNET_SUBNET, supervisor = $SUPERVISOR_IP"
+echo ">> $NET = $SUBNET, supervisor = $LAN_IP"
 
 mkdir -p secrets/code-server "$QUADLET_DIR"
 
@@ -116,8 +90,8 @@ EOF
 fi
 
 echo ">> render Quadlet -> $QUADLET"
-sed -e "s|@NET@|$NET|g" -e "s|@IP@|$SUPERVISOR_IP|g" \
-    -e "s|@SUBNET@|$APPNET_SUBNET|g" -e "s|@REPO@|$REPO|g" \
+sed -e "s|@NET@|$NET|g" -e "s|@IP@|$LAN_IP|g" \
+    -e "s|@SUBNET@|$SUBNET|g" -e "s|@REPO@|$REPO|g" \
     quadlet/supervisor.container.in >"$QUADLET"
 
 echo ">> build $IMAGE"
@@ -125,8 +99,8 @@ echo ">> build $IMAGE"
 podman build --format docker -t "$IMAGE" .
 
 echo ">> restart $SERVICE"
-systemctl --user daemon-reload
-systemctl --user restart "$SERVICE"
+systemctl daemon-reload
+systemctl restart "$SERVICE"
 
 echo -n ">> cho systemd trong container len"
 for _ in $(seq 1 60); do
@@ -138,6 +112,6 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 
-podman ps --filter name=supervisor --format '{{.Names}} | {{.Status}} | {{.Ports}}'
+podman ps --filter name=supervisor --format '{{.Names}} | {{.Status}}'
 podman inspect supervisor --format "IP tren $NET: {{(index .NetworkSettings.Networks \"$NET\").IPAddress}}"
 podman exec supervisor systemctl --failed --no-pager || true

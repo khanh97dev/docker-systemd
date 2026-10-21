@@ -5,7 +5,7 @@
 #   podman exec supervisor cat /root/.config/code-server/config.yaml
 #
 # Bind 0.0.0.0:8080 trong container: chỉ cloudflared (cùng container) và các
-# container khác join appnet gọi được; port 8080 KHÔNG publish ra host.
+# máy khác trong LAN gọi được qua IP macvlan của container; port KHÔNG publish ra host.
 [Unit]
 Description=code-server (VS Code in browser)
 After=network-online.target

@@ -9,11 +9,11 @@ cloudflared chạy trong cùng container.
 | PID 1 | `systemd` (`/sbin/init`) |
 | CPU limit | 4 (`cpu.max = 400000 100000`) |
 | RAM limit | 6 GiB (swap tắt) |
-| Restart policy | systemd `--user` unit `Restart=always` (Quadlet) |
+| Restart policy | systemd unit `Restart=always` (Quadlet) |
 | privileged | **không** (chỉ `SYS_ADMIN` + `apparmor=unconfined`) |
-| Runtime | **rootless podman** (Quadlet + `loginctl enable-linger`) |
-| Network | `appnet` — subnet `/24` **random** trong `172.16.0.0/12` lúc init |
-| IP tĩnh | random trong `.2`-`.127` của subnet đó |
+| Runtime | **podman rootful** (Quadlet ở `/etc/containers/systemd`) |
+| Network | `lan` — **macvlan** trên card mạng chính, container có IP thật trên LAN |
+| IP tĩnh | random `.180`-`.254` trong dải `/24` của host, lúc init |
 | Port | không publish ra host — truy cập qua cloudflared hoặc `podman exec` |
 | cloudflared | 2026.10.2, `.deb` chính thức, pin + verify sha256 |
 | opencode | v2.1.1 (npm registry), pin + verify sha256 |
@@ -22,15 +22,16 @@ cloudflared chạy trong cùng container.
 
 ## Lệnh
 
-Chạy bằng user thường (vd `thepodman`), không cần root:
+Chạy bằng **root**:
 
 ```bash
-./deploy.sh              # build + render Quadlet + restart (lần đầu: random IP)
-./deploy.sh --new-ip     # xoá network appnet, random lại subnet/IP
+sudo ./deploy.sh                       # build + render Quadlet + restart (lần đầu: random IP)
+sudo ./deploy.sh --new-ip              # random lại IP
+sudo LAN_IP=172.16.7.188 ./deploy.sh   # chọn IP cố định
 
-systemctl --user status supervisor.service
-systemctl --user stop supervisor.service
-journalctl --user -u supervisor.service -f
+systemctl status supervisor.service
+systemctl stop supervisor.service
+journalctl -u supervisor.service -f
 
 podman exec supervisor systemctl status
 podman exec supervisor systemctl is-system-running      # phải là "running"
@@ -41,7 +42,7 @@ podman exec supervisor journalctl -u app -f
 
 ## Yêu cầu để systemd chạy trong container
 
-Đã test (cgroup v2, AppArmor bật, rootless podman 4.9). **Thiếu bất kỳ dòng nào -> container exit 255:**
+Đã test (cgroup v2, AppArmor bật, podman 4.9). **Thiếu bất kỳ dòng nào -> container exit 255:**
 
 Khai trong `quadlet/supervisor.container.in` (`PodmanArgs=`/`Volume=`):
 
@@ -116,7 +117,7 @@ Cách A — ghi token từ host:
 printf '%s' '<TUNNEL_TOKEN>' > secrets/token
 chmod 600 secrets/token
 mkdir -p secrets/code-server
-systemctl --user restart supervisor.service
+systemctl restart supervisor.service
 podman exec supervisor systemctl enable --now cloudflared
 ```
 
@@ -154,28 +155,29 @@ Ingress (hostname -> service) khai trên Cloudflare Zero Trust dashboard; servic
 
 ## Network
 
-Không hardcode IP. Lần init (chưa có network `appnet`) `deploy.sh`:
+Container nằm **thẳng trên LAN** qua macvlan `lan` (card mạng có default route),
+nên có IP thật mà máy nào trong LAN cũng gọi được. Không hardcode IP: lần init
+`deploy.sh` random một IP `.180`-`.254` trong dải `/24` chứa IP host, bỏ qua IP
+gateway/host và IP nào đang trả lời ping/ARP.
 
-1. Random một subnet `172.<16-31>.<0-255>.0/24` (dải private `172.16.0.0/12`),
-   **bỏ qua** mọi dải trùng route/interface của host và network podman khác
-   (vd LAN của host, các bridge docker/podman khác).
-2. Tạo `appnet`: gateway `.1`, dynamic pool `.128/25` -> IP tĩnh `.2`-`.127`
-   không bao giờ bị cấp trùng.
-3. Random IP container trong `.2`-`.127`, render vào
-   `~/.config/containers/systemd/supervisor.container` (`Network=appnet:ip=...`).
-
-Không có file state: lần chạy sau lấy subnet từ chính network `appnet` và IP từ
-Quadlet đã render, nên IP **giữ nguyên** qua mỗi lần deploy. Muốn đổi:
-`./deploy.sh --new-ip`. Xem IP hiện tại:
+Không có file state: lần chạy sau đọc lại IP từ Quadlet đã render
+(`/etc/containers/systemd/supervisor.container`, `Network=lan:ip=...`), nên IP
+**giữ nguyên** qua mỗi lần deploy. Đổi: `sudo ./deploy.sh --new-ip`, hoặc chọn
+tay `sudo LAN_IP=<ip> ./deploy.sh`. Xem IP hiện tại:
 
 ```bash
-podman inspect supervisor --format '{{(index .NetworkSettings.Networks "appnet").IPAddress}}'
+podman inspect supervisor --format '{{(index .NetworkSettings.Networks "lan").IPAddress}}'
 ```
 
-> Rootless không tạo bridge trên host: IP này chỉ gọi được từ container khác
-> (cùng user) join `appnet` (`podman run --network appnet ...`, gọi `supervisor:22`).
-> Không publish port ra host: vào từ ngoài qua cloudflared tunnel, hoặc
-> `podman exec -it supervisor bash` trên host.
+Ingress cloudflared trỏ vào `http://<ip container>:8080`.
+
+> **Vì sao không dùng bridge?** Bridge (rootless là netns riêng, rootful là
+> bridge trên host) chỉ máy này thấy. Tunnel có connector ở máy khác cùng LAN
+> -> connector đó gọi IP container bị timeout 30s -> Cloudflare trả **502**.
+> Macvlan cho IP thật trên LAN nên connector nào cũng gọi được.
+>
+> **Giới hạn macvlan:** chính host **không** gọi được IP container (kernel chặn
+> host <-> macvlan con). Từ host dùng `podman exec`.
 
 ## Healthcheck
 
@@ -189,10 +191,10 @@ podman inspect supervisor --format '{{(index .NetworkSettings.Networks "appnet")
 
 ## Lưu ý về restart
 
-- Restart do systemd `--user` lo (`Restart=always` trong Quadlet): container
+- Restart do systemd lo (`Restart=always` trong Quadlet): container
   chết (kể cả `kill -9` PID 1) -> unit tự chạy lại.
-- `systemctl --user stop supervisor.service` là dừng có chủ đích, không restart.
-- Tự chạy khi boot nhờ `loginctl enable-linger <user>`.
+- `systemctl stop supervisor.service` là dừng có chủ đích, không restart.
+- Tự chạy khi boot (`WantedBy=default.target` trong Quadlet).
 
 ## opencode
 

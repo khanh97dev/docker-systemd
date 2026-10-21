@@ -1,7 +1,7 @@
-# Template - KHONG sua file da render o ~/.config/containers/systemd/.
-# deploy.sh thay @NET@ @IP@ @SUBNET@ @REPO@ (subnet/IP random luc init) roi ghi ra do.
+# Template - KHONG sua file da render o /etc/containers/systemd/.
+# deploy.sh thay @NET@ @IP@ @SUBNET@ @REPO@ (IP LAN random luc init) roi ghi ra do.
 [Unit]
-Description=supervisor - Debian 13 + systemd PID1 (rootless podman)
+Description=supervisor - Debian 13 + systemd PID1 (podman rootful)
 Wants=network-online.target
 After=network-online.target
 
@@ -10,8 +10,8 @@ Image=localhost/supervisor:latest
 ContainerName=supervisor
 HostName=supervisor
 
-# IP tinh @IP@ tren network @NET@ (@SUBNET@, dynamic pool .128-.254).
-# Subnet + IP duoc random luc init, xem deploy.sh.
+# IP tinh @IP@ tren macvlan @NET@ (@SUBNET@) - IP that tren LAN.
+# IP random .180-.254 luc init, xem deploy.sh.
 Network=@NET@:ip=@IP@
 
 Volume=@REPO@/app:/app
