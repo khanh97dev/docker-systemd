@@ -2,9 +2,10 @@
 # An container khoi LAN: chay tren HOST (Quadlet ExecStartPost), ap nftables
 # vao network namespace cua container qua nsenter. Container khong co
 # CAP_NET_ADMIN nen root trong container khong go duoc rule nay.
-#   lan-firewall.sh <container> <ip duoc phep>...
+#   LAN_PORTS="8080 1111" lan-firewall.sh <container> <ip duoc phep>...
 #
-# - Chi <ip duoc phep> vao duoc tcp/8080; moi thu khac (ssh, ping...) bi drop.
+# - Chi <ip duoc phep> vao duoc tcp LAN_PORTS (mac dinh 8080); moi thu khac
+#   (ssh, ping...) bi drop.
 # - ARP request chi duoc tra loi cho gateway + <ip duoc phep> -> arp-scan/nmap
 #   tu may khac thay IP nhu dang trong.
 # - Tat IPv6 (link-local fe80:: van bi do qua NDP).
@@ -18,6 +19,7 @@ in_ns() { nsenter -t "$PID" -n "$@"; }
 
 GW=$(in_ns ip -4 route show default | awk '{print $3; exit}')
 ALLOW=$(echo "$GW" "$@" | tr ' ' ',')
+PORTS=$(echo "${LAN_PORTS:-8080}" | tr ' ' ',')
 
 in_ns sysctl -qw net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1
 
@@ -29,7 +31,7 @@ table inet lanfw {
     type filter hook input priority 0; policy drop;
     iif lo accept
     ct state established,related accept
-    ip saddr @allow tcp dport 8080 accept
+    ip saddr @allow tcp dport { $PORTS } accept
   }
 }
 table arp lanfw {
@@ -40,4 +42,4 @@ table arp lanfw {
   }
 }
 NFT
-echo "lan-firewall: $NAME chi cho phep $ALLOW"
+echo "lan-firewall: $NAME chi cho phep $ALLOW -> tcp $PORTS"

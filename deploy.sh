@@ -6,6 +6,7 @@
 #   sudo LAN_IP=172.16.7.188 ./deploy.sh  # chon IP co dinh thay vi random
 #   sudo LAN_ALLOW="172.16.7.73" ./deploy.sh  # IP duoc goi vao 8080 (connector
 #                                         # cloudflared); con lai cua LAN khong thay
+#   sudo LAN_PORTS="8080 1111" ./deploy.sh  # port LAN_ALLOW duoc vao (mac dinh 8080)
 #
 # Container nam thang tren LAN (macvlan) voi IP that, nen cloudflared o bat ky
 # may nao trong LAN cung goi duoc. Bridge rieng (rootless hay rootful) thi chi
@@ -15,7 +16,7 @@
 # IP random trong .180-.254 cua dai /24 chua IP host, bo qua IP dang co may
 # tra loi ARP. Khong luu file trang thai: IP doc lai tu Quadlet da render.
 #
-# An khoi LAN: host/lan-firewall.sh chi cho LAN_ALLOW vao tcp/8080, khong tra
+# An khoi LAN: host/lan-firewall.sh chi cho LAN_ALLOW vao tcp LAN_PORTS, khong tra
 # loi ping, va chi tra loi ARP cho gateway + LAN_ALLOW -> may khac scan khong thay.
 # LAN_ALLOW rong -> khong bat firewall (canh bao).
 #
@@ -75,6 +76,10 @@ fi
 if [ -z "${LAN_ALLOW:-}" ]; then
   LAN_ALLOW=$(sed -n "s|^ExecStartPost=.*lan-firewall supervisor ||p" "$QUADLET" 2>/dev/null || true)
 fi
+if [ -z "${LAN_PORTS:-}" ]; then
+  LAN_PORTS=$(sed -n 's|^Environment=LAN_PORTS="\(.*\)"$|\1|p' "$QUADLET" 2>/dev/null || true)
+fi
+LAN_PORTS=${LAN_PORTS:-8080}
 if [ -z "$LAN_ALLOW" ]; then
   echo "!! LAN_ALLOW rong -> KHONG an container khoi LAN (ca LAN scan/goi duoc)" >&2
 fi
@@ -106,12 +111,12 @@ fi
 # trong repo (user thuong ghi duoc) thi user do sua script la len duoc root.
 install -m 755 -o root -g root host/lan-firewall.sh /usr/local/sbin/supervisor-lan-firewall
 
-echo ">> render Quadlet -> $QUADLET (allow: ${LAN_ALLOW:-<khong>})"
+echo ">> render Quadlet -> $QUADLET (allow: ${LAN_ALLOW:-<khong>} -> tcp $LAN_PORTS)"
 FW_OFF=
-[ -n "$LAN_ALLOW" ] || FW_OFF='/lan-firewall/d'
+[ -n "$LAN_ALLOW" ] || FW_OFF='/lan-firewall\|LAN_PORTS/d'
 sed -e "s|@NET@|$NET|g" -e "s|@IP@|$LAN_IP|g" \
     -e "s|@SUBNET@|$SUBNET|g" -e "s|@REPO@|$REPO|g" \
-    -e "s|@ALLOW@|$LAN_ALLOW|g" -e "$FW_OFF" \
+    -e "s|@ALLOW@|$LAN_ALLOW|g" -e "s|@PORTS@|$LAN_PORTS|g" -e "$FW_OFF" \
     quadlet/supervisor.container.in >"$QUADLET"
 
 echo ">> build $IMAGE"

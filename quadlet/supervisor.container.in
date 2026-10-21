@@ -32,7 +32,8 @@ Volume=/sys/fs/cgroup:/sys/fs/cgroup:rw
 PodmanArgs=--cgroupns=host --cap-add=SYS_ADMIN --security-opt apparmor=unconfined --cpus=4 --memory=6g --memory-swap=6g --pids-limit=4096 --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777,size=2g --stop-signal=SIGRTMIN+3 --stop-timeout=30 --health-cmd=/usr/local/sbin/healthcheck.sh --health-interval=30s --health-timeout=10s --health-start-period=40s --health-retries=3
 
 [Service]
-# An container khoi LAN: chi @ALLOW@ vao duoc 8080, xem host/lan-firewall.sh.
+# An container khoi LAN: chi @ALLOW@ vao duoc tcp @PORTS@, xem host/lan-firewall.sh.
+Environment=LAN_PORTS="@PORTS@"
 ExecStartPost=/usr/local/sbin/supervisor-lan-firewall supervisor @ALLOW@
 Restart=always
 RestartSec=5

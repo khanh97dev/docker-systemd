@@ -183,6 +183,7 @@ Ingress cloudflared trỏ vào `http://<ip container>:8080`.
 
 ```bash
 sudo LAN_ALLOW="<ip connector cloudflared>" ./deploy.sh   # nhiều IP: cách nhau bằng dấu cách
+sudo LAN_PORTS="8080 1111" ./deploy.sh                 # port được vào (mặc định 8080)
 ```
 
 `host/lan-firewall.sh` (cài vào `/usr/local/sbin/supervisor-lan-firewall`, chạy
@@ -191,14 +192,17 @@ network namespace của container **từ host**:
 
 | | |
 |---|---|
-| TCP vào | chỉ `LAN_ALLOW` -> `:8080`; còn lại (ssh 22, ...) drop |
+| TCP vào | chỉ `LAN_ALLOW` -> `LAN_PORTS` (mặc định `8080`); còn lại (ssh 22, ...) drop |
 | Ping | không trả lời |
 | ARP | chỉ trả lời gateway + `LAN_ALLOW` -> `arp-scan`/`nmap` từ máy khác thấy IP trống |
 | IPv6 | tắt (link-local `fe80::` vẫn bị dò qua NDP) |
 | Đi ra | bình thường (internet, cloudflared, `ct state established`) |
 
 Container không có `CAP_NET_ADMIN` nên root trong container không gỡ được rule.
-`LAN_ALLOW` đọc lại từ Quadlet nên chỉ cần truyền lần đầu. Tìm IP connector:
+`LAN_ALLOW`/`LAN_PORTS` đọc lại từ Quadlet nên chỉ cần truyền lần đầu.
+
+> Port khác trong container cũng vào được qua proxy của code-server mà không
+> cần mở firewall: `https://<domain code-server>/proxy/<port>/` (phải đăng nhập). Tìm IP connector:
 gọi domain rồi xem nguồn kết nối vào 8080:
 
 ```bash
