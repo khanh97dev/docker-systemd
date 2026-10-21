@@ -1,8 +1,8 @@
-# Tunnel đọc token từ /etc/cloudflared/token (mount từ host, xem docker-compose.yml).
+# Tunnel đọc token từ /etc/cloudflared/token (mount từ host, xem quadlet/supervisor.container.in).
 # KHÔNG enable sẵn trong image — cần có token trước:
 #   echo -n '<TOKEN>' > secrets/token && chmod 600 secrets/token
-#   docker compose up -d
-#   docker exec supervisor systemctl enable --now cloudflared
+#   ./deploy.sh
+#   podman exec supervisor systemctl enable --now cloudflared
 [Unit]
 Description=Cloudflare Tunnel
 After=network-online.target

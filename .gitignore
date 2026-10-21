@@ -2,6 +2,5 @@
 secrets/*
 !secrets/.gitkeep
 
-.env
 app/*
 !app/.gitkeep

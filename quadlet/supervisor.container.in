@@ -1,0 +1,43 @@
+# Template - KHONG sua file da render o ~/.config/containers/systemd/.
+# deploy.sh thay @NET@ @IP@ @SUBNET@ @REPO@ (subnet/IP random luc init) roi ghi ra do.
+[Unit]
+Description=supervisor - Debian 13 + systemd PID1 (rootless podman)
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=localhost/supervisor:latest
+ContainerName=supervisor
+HostName=supervisor
+
+# IP tinh @IP@ tren network @NET@ (@SUBNET@, dynamic pool .128-.254).
+# Subnet + IP duoc random luc init, xem deploy.sh.
+Network=@NET@:ip=@IP@
+PublishPort=2222:22
+
+Volume=@REPO@/app:/app
+Volume=@REPO@/units:/etc/systemd/system/custom:ro
+# Mount ca THU MUC (khong mount file le): clone moi chua co secrets/token thi
+# podman tao DIRECTORY ten "token" -> cloudflared loi rat kho hieu.
+# KHONG :ro -> `cloudflared service install <TOKEN>` trong container ghi duoc token.
+Volume=@REPO@/secrets:/etc/cloudflared
+# Config + mat khau code-server: nam trong secrets/ (gitignored) -> song qua rebuild
+Volume=@REPO@/secrets/code-server:/root/.config/code-server
+Volume=/sys/fs/cgroup:/sys/fs/cgroup:rw
+
+# Cac co bat buoc de systemd lam PID1 trong container.
+# --cgroupns=host: cgroupns=private -> container exit 255.
+# apparmor=unconfined: host bat AppArmor, profile mac dinh chan systemd.
+# /tmp CAN exec: opencode (Bun) giai nen native lib ra /tmp roi dlopen().
+# Anh build OCI bo qua HEALTHCHECK cua Containerfile -> khai lai bang --health-*.
+PodmanArgs=--cgroupns=host --cap-add=SYS_ADMIN --security-opt apparmor=unconfined --cpus=4 --memory=6g --memory-swap=6g --pids-limit=4096 --tmpfs /run --tmpfs /run/lock --tmpfs /tmp:exec,mode=1777,size=2g --stop-signal=SIGRTMIN+3 --stop-timeout=30 --health-cmd=/usr/local/sbin/healthcheck.sh --health-interval=30s --health-timeout=10s --health-start-period=40s --health-retries=3
+
+[Service]
+Restart=always
+RestartSec=5
+TasksMax=infinity
+TimeoutStartSec=300
+TimeoutStopSec=40
+
+[Install]
+WantedBy=default.target

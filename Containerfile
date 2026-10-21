@@ -7,7 +7,7 @@ ARG CODE_SERVER_VERSION=4.141.0
 ARG DEBIAN_FRONTEND=noninteractive
 
 # systemd cần biết nó đang trong container
-ENV container=docker \
+ENV container=podman \
     TZ=Australia/Sydney
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
