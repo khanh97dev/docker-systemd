@@ -2,6 +2,7 @@ FROM debian:13-slim
 
 ARG TARGETARCH
 ARG CLOUDFLARED_VERSION=2026.10.2
+ARG OPENCODE_VERSION=2.1.1
 ARG DEBIAN_FRONTEND=noninteractive
 
 # systemd cần biết nó đang trong container
@@ -31,6 +32,24 @@ RUN set -eux; \
     dpkg -i /tmp/cloudflared.deb; \
     rm -f /tmp/cloudflared.deb; \
     cloudflared --version
+
+# ---- opencode v2 (CLI) ----
+# v2 phát hành qua npm registry, KHÔNG qua GitHub releases (github chỉ có 1.x).
+# Version lấy từ https://opencode.ai/update/api/latest/cli/npm
+RUN set -eux; \
+    case "${TARGETARCH:-arm64}" in \
+      arm64) OC_T=linux-arm64; SHA=cfa3ae6363fc3082f03072297069d81f53559a761371fdb4b56fe6bfa01ca066 ;; \
+      amd64) OC_T=linux-x64;   SHA=64591057ea593e9a11374d4630c2249930d8f33598af0b3e02137493860ab17b ;; \
+      *) echo "arch không hỗ trợ: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/opencode.tgz \
+      "https://registry.npmjs.org/@opencode/cli-${OC_T}/-/cli-${OC_T}-${OPENCODE_VERSION}.tgz"; \
+    echo "${SHA}  /tmp/opencode.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/opencode.tgz -C /tmp package/bin/opencode; \
+    mv /tmp/package/bin/opencode /usr/local/bin/opencode; \
+    chmod 755 /usr/local/bin/opencode; \
+    rm -rf /tmp/opencode.tgz /tmp/package; \
+    opencode --version
 
 # ---- Mask unit không chạy được / không cần trong container ----
 # Không mask -> systemd báo "degraded" vì các unit này fail.

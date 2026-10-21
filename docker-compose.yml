@@ -23,7 +23,10 @@ services:
     tmpfs:
       - /run
       - /run/lock
-      - /tmp
+      # /tmp CẦN exec: Docker mặc định tmpfs là noexec,size=64m. opencode (Bun)
+      # giải nén native lib ra /tmp rồi dlopen() -> noexec làm nó fail với
+      # "failed to map segment from shared object". 64m cũng không đủ chỗ.
+      - /tmp:exec,mode=1777,size=2g
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
       - ./app:/app

@@ -15,6 +15,7 @@ cloudflared chạy trong cùng container.
 | IP tĩnh | `172.28.0.10` |
 | Port | `2222 -> 22` (sshd) |
 | cloudflared | 2026.10.2, `.deb` chính thức, pin + verify sha256 |
+| opencode | v2.1.1 (npm registry), pin + verify sha256 |
 | Service sẵn | `ssh`, `cron`, `app` (enabled) · `cloudflared` (cần token) |
 
 ## Lệnh
@@ -39,7 +40,7 @@ docker exec supervisor journalctl -u app -f
 cap_add: [SYS_ADMIN]
 security_opt: [apparmor=unconfined]
 cgroup: host
-tmpfs: [/run, /run/lock, /tmp]
+tmpfs: [/run, /run/lock, "/tmp:exec,mode=1777,size=2g"]
 volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw", "./secrets:/etc/cloudflared"]
 init: false
 stop_signal: SIGRTMIN+3
@@ -179,3 +180,34 @@ Rồi dùng `supervisor:22` (DNS) hoặc `172.28.0.10:22`.
   `RestartCount` không tăng.
 - Policy chỉ áp dụng khi container tự chết, hoặc Docker daemon khởi động lại.
   Test đúng: `docker exec supervisor systemctl reboot` -> `RestartCount` tăng.
+
+## opencode
+
+Đã cài sẵn trong image, `opencode v2.1.1`.
+
+**v2 phát hành qua npm registry, không qua GitHub releases** — GitHub `sst/opencode`
+chỉ có tag `1.x`. Version mới nhất lấy ở:
+
+```bash
+curl -fsSL https://opencode.ai/update/api/latest/cli/npm
+```
+
+rồi đổi `ARG OPENCODE_VERSION` + sha256 trong `Dockerfile`.
+
+### `/tmp` phải có `exec`
+
+```yaml
+tmpfs:
+  - /tmp:exec,mode=1777,size=2g
+```
+
+Docker mặc định mount tmpfs là `noexec,size=64m`. opencode (Bun) giải nén native
+lib ra `/tmp` rồi `dlopen()`, nên `noexec` làm nó chết với:
+
+```
+Failed to initialize OpenTUI render library: Failed to open library
+"/tmp/.xxx.so": failed to map segment from shared object
+```
+
+64MB cũng không đủ chỗ. Đây là lỗi dễ tưởng là bug của opencode nhưng thực ra do
+cấu hình tmpfs của container.
