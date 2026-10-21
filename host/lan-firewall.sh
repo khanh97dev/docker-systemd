@@ -18,7 +18,8 @@ PID=$(podman inspect -f '{{.State.Pid}}' "$NAME")
 in_ns() { nsenter -t "$PID" -n "$@"; }
 
 GW=$(in_ns ip -4 route show default | awk '{print $3; exit}')
-ALLOW=$(echo "$GW" "$@" | tr ' ' ',')
+ALLOW=$(echo "$@" | tr ' ' ',')          # duoc vao tcp PORTS
+ARP_OK=$(echo "$GW" "$@" | tr ' ' ',')   # duoc tra loi ARP (gateway can de tra goi ra ngoai)
 PORTS=$(echo "${LAN_PORTS:-8080}" | tr ' ' ',')
 
 in_ns sysctl -qw net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1
@@ -35,11 +36,11 @@ table inet lanfw {
   }
 }
 table arp lanfw {
-  set allow { type ipv4_addr; elements = { $ALLOW } }
+  set arp_ok { type ipv4_addr; elements = { $ARP_OK } }
   chain input {
     type filter hook input priority 0; policy accept;
-    arp operation request arp saddr ip != @allow drop
+    arp operation request arp saddr ip != @arp_ok drop
   }
 }
 NFT
-echo "lan-firewall: $NAME chi cho phep $ALLOW -> tcp $PORTS"
+echo "lan-firewall: $NAME chi cho phep $ALLOW -> tcp $PORTS (ARP: $ARP_OK)"

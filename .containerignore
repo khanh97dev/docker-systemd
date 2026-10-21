@@ -1,3 +1,7 @@
 .git
 README.md
 app
+secrets
+host
+quadlet
+deploy.sh

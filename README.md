@@ -156,7 +156,7 @@ Kiểm tra:
 
 ```bash
 journalctl -u supervisor.service -n 30 --no-pager | grep 'lan-firewall:' | tail -1
-# lan-firewall: supervisor chi cho phep <gw>,172.16.7.73 -> tcp 8080
+# lan-firewall: supervisor chi cho phep 172.16.7.73 -> tcp 8080 (ARP: <gw>,172.16.7.73)
 curl -s -o /dev/null -w '%{http_code}\n' https://<hostname>/login                 # vẫn 200
 ```
 

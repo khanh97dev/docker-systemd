@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Build image + (re)start container supervisor bang podman ROOTFUL (Quadlet).
 # Phai chay bang root:
-#   sudo ./deploy.sh                      # lan dau: random IP LAN .180-.254
-#   sudo ./deploy.sh --new-ip             # random lai IP
-#   sudo LAN_IP=172.16.7.188 ./deploy.sh  # chon IP co dinh thay vi random
-#   sudo LAN_ALLOW="172.16.7.73" ./deploy.sh  # IP duoc goi vao 8080 (connector
-#                                         # cloudflared); con lai cua LAN khong thay
-#   sudo LAN_PORTS="8080 1111" ./deploy.sh  # port LAN_ALLOW duoc vao (mac dinh 8080)
+#   sudo ./deploy.sh                          # lan dau: random IP LAN .180-.254
+#   sudo ./deploy.sh --new-ip                 # random lai IP
+#   sudo LAN_IP=172.16.7.188 ./deploy.sh      # chon IP thay vi random
+#   sudo LAN_ALLOW="172.16.7.73" ./deploy.sh  # IP connector cloudflared duoc goi vao
+#   sudo LAN_PORTS="8080 1111" ./deploy.sh    # port mo cho LAN_ALLOW (mac dinh 8080)
+# Bien chi can truyen khi muon DOI: lan sau doc lai tu Quadlet da render.
 #
 # Container nam thang tren LAN (macvlan) voi IP that, nen cloudflared o bat ky
 # may nao trong LAN cung goi duoc. Bridge rieng (rootless hay rootful) thi chi
@@ -122,21 +122,26 @@ sed -e "s|@NET@|$NET|g" -e "s|@IP@|$LAN_IP|g" \
 echo ">> build $IMAGE"
 # --format docker: anh OCI bo qua HEALTHCHECK (Quadlet van khai lai --health-*)
 podman build --format docker -t "$IMAGE" .
+podman image prune -f >/dev/null   # xoa image <none> cua lan build truoc
 
 echo ">> restart $SERVICE"
 systemctl daemon-reload
 systemctl restart "$SERVICE"
 
 echo -n ">> cho systemd trong container len"
+STATE=
 for _ in $(seq 1 60); do
-  if [ "$(podman exec supervisor systemctl is-system-running 2>/dev/null || true)" = "running" ]; then
-    echo " ... running"
-    break
-  fi
+  STATE=$(podman exec supervisor systemctl is-system-running 2>/dev/null || true)
+  [ "$STATE" = "running" ] && break
   echo -n "."
   sleep 2
 done
+if [ "$STATE" != "running" ]; then
+  echo " ... TIMEOUT (systemd: ${STATE:-khong tra loi})" >&2
+  podman exec supervisor systemctl --failed --no-pager >&2 || journalctl -u "$SERVICE" -n 30 --no-pager >&2
+  exit 1
+fi
+echo " ... running"
 
 podman ps --filter name=supervisor --format '{{.Names}} | {{.Status}}'
 podman inspect supervisor --format "IP tren $NET: {{(index .NetworkSettings.Networks \"$NET\").IPAddress}}"
-podman exec supervisor systemctl --failed --no-pager || true

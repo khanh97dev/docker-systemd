@@ -1,5 +1,5 @@
 # Template - KHONG sua file da render o /etc/containers/systemd/.
-# deploy.sh thay @NET@ @IP@ @SUBNET@ @REPO@ @ALLOW@ (IP LAN random luc init) roi ghi ra do.
+# deploy.sh thay @NET@ @IP@ @SUBNET@ @REPO@ @ALLOW@ @PORTS@ roi ghi ra do.
 [Unit]
 Description=supervisor - Debian 13 + systemd PID1 (podman rootful)
 Wants=network-online.target
