@@ -1,0 +1,7 @@
+# Token tunnel - KHÔNG BAO GIỜ commit (repo này public)
+secrets/*
+!secrets/.gitkeep
+
+.env
+app/*
+!app/.gitkeep

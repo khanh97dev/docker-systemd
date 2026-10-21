@@ -1,0 +1,23 @@
+# Tunnel đọc token từ /etc/cloudflared/token (mount từ host, xem docker-compose.yml).
+# KHÔNG enable sẵn trong image — cần có token trước:
+#   echo -n '<TOKEN>' > secrets/token && chmod 600 secrets/token
+#   docker compose up -d
+#   docker exec supervisor systemctl enable --now cloudflared
+[Unit]
+Description=Cloudflare Tunnel
+After=network-online.target
+Wants=network-online.target
+# FileNotEmpty (không phải PathExists): token rỗng -> unit bị skip sạch,
+# không tính là failed, systemd vẫn 'running'.
+ConditionFileNotEmpty=/etc/cloudflared/token
+
+[Service]
+# simple, KHÔNG phải notify: binary cloudflared không hỗ trợ sd_notify
+# (không có NOTIFY_SOCKET) -> Type=notify treo ở 'activating' vĩnh viễn.
+Type=simple
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/token
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

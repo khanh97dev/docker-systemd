@@ -1,0 +1,17 @@
+# Service mẫu — đổi ExecStart thành app thật của bạn
+[Unit]
+Description=App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/app
+ExecStart=/bin/sh -c 'while true; do echo "[app] alive $(date -Iseconds)"; sleep 30; done'
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
