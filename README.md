@@ -20,25 +20,191 @@ cloudflared chạy trong cùng container.
 | code-server | 4.141.0, `.deb` chính thức, pin + verify sha256 — `0.0.0.0:8080` |
 | Service sẵn | `ssh`, `cron`, `app`, `code-server` (enabled) · `cloudflared` (enable sẵn, có `ConditionFileNotEmpty=/etc/cloudflared/token` nên chưa có token thì unit bị skip, không fail) |
 
-## Lệnh
+## Deploy từng bước (podman)
 
-Chạy bằng **root**:
+Làm **đúng thứ tự**. Mỗi bước có lệnh, kết quả mong đợi, và cách xử lý khi sai.
+Không bỏ bước kiểm tra.
+
+### Quy tắc
+
+1. Mọi lệnh chạy bằng **root** (`sudo -i` hoặc thêm `sudo`). Đây là podman
+   **rootful**, không phải rootless, không phải docker.
+2. Chạy lệnh trong thư mục repo (vd `/home/thepodman/docker-systemd`).
+3. **Không** sửa `/etc/containers/systemd/supervisor.container`: file này do
+   `deploy.sh` sinh ra từ `quadlet/supervisor.container.in`, sửa tay sẽ bị ghi đè.
+4. **Không** in, log, hay commit nội dung `secrets/token` (token Cloudflare).
+5. **Không** chạy `./deploy.sh --new-ip` trừ khi được yêu cầu: nó đổi IP
+   container, domain sẽ hỏng cho tới khi sửa ingress trên Cloudflare.
+
+### Bước 1. Kiểm tra máy host
 
 ```bash
-sudo ./deploy.sh                       # build + render Quadlet + restart (lần đầu: random IP)
-sudo ./deploy.sh --new-ip              # random lại IP
-sudo LAN_IP=172.16.7.188 ./deploy.sh   # chọn IP cố định
-
-systemctl status supervisor.service
-systemctl stop supervisor.service
-journalctl -u supervisor.service -f
-
-podman exec supervisor systemctl status
-podman exec supervisor systemctl is-system-running      # phải là "running"
-podman exec supervisor systemctl --failed
-podman exec supervisor systemctl restart app
-podman exec supervisor journalctl -u app -f
+podman --version                       # >= 4.4 (cần Quadlet). vd: podman version 4.9.3
+stat -fc %T /sys/fs/cgroup             # phải là: cgroup2fs
+nft --version && nsenter --version     # phải có cả hai (nftables, util-linux)
+ip -4 route show default               # phải có 1 dòng "default via <gw> dev <card>"
 ```
+
+Sai thì làm:
+
+| Kết quả sai | Cách sửa |
+|---|---|
+| `podman: command not found` hoặc < 4.4 | `apt-get install -y podman` (Debian 12+/Ubuntu 24.04+) |
+| `nft`/`nsenter` không có | `apt-get install -y nftables util-linux` |
+| cgroup không phải `cgroup2fs` | dừng lại, máy không hỗ trợ (cần cgroup v2) |
+| không có default route | dừng lại, báo người dùng (cần mạng LAN) |
+
+### Bước 2. Lấy code
+
+```bash
+git clone https://github.com/khanh97dev/docker-systemd.git
+cd docker-systemd
+```
+
+Đã có repo thì `git pull`.
+
+### Bước 3. Token Cloudflare (bỏ qua nếu chưa có)
+
+```bash
+printf '%s' '<TUNNEL_TOKEN>' > secrets/token
+chmod 600 secrets/token
+```
+
+- Không có token: container vẫn chạy, chỉ unit `cloudflared` bị skip (không lỗi).
+- Mật khẩu code-server: `deploy.sh` tự tạo `secrets/code-server/config.yaml`
+  với mật khẩu **`123`** nếu file chưa có. Đổi mật khẩu = sửa dòng `password:`
+  trong file đó rồi `podman exec supervisor systemctl restart code-server`.
+
+### Bước 4. Deploy lần đầu
+
+```bash
+sudo ./deploy.sh
+```
+
+Script tự làm: chọn IP LAN ngẫu nhiên `.180`-`.254` còn trống -> tạo network
+macvlan `lan` -> render Quadlet -> build image -> start `supervisor.service`.
+Build lần đầu mất vài phút.
+
+Output cuối phải có các dòng (IP có thể khác):
+
+```
+>> random IP: 172.16.7.188
+>> cho systemd trong container len. ... running
+IP tren lan: 172.16.7.188
+```
+
+**Ghi lại IP này.** Lần đầu sẽ có cảnh báo
+`!! LAN_ALLOW rong -> KHONG an container khoi LAN`: bình thường, bước 7 sẽ bật.
+
+Muốn chọn IP thay vì random: `sudo LAN_IP=172.16.7.200 ./deploy.sh`.
+
+### Bước 5. Kiểm tra container
+
+```bash
+systemctl is-active supervisor.service                    # active
+podman exec supervisor systemctl is-system-running        # running
+podman exec supervisor systemctl is-active code-server    # active
+podman healthcheck run supervisor && echo healthy         # healthy (đợi ~40s sau start)
+podman inspect supervisor --format '{{(index .NetworkSettings.Networks "lan").IPAddress}}'   # IP ở bước 4
+```
+
+| Kết quả sai | Cách xem lỗi |
+|---|---|
+| `supervisor.service` không `active` | `journalctl -u supervisor.service -n 50 --no-pager` |
+| `degraded` | `podman exec supervisor systemctl --failed` rồi `podman exec supervisor journalctl -u <unit> -n 50` |
+| container exit 255 ngay | thiếu cờ systemd, xem mục "Yêu cầu để systemd chạy trong container" |
+
+> **Không** dùng `curl http://<IP container>` từ chính host để test: macvlan
+> chặn host gọi container (giới hạn kernel), lúc nào cũng timeout. Test từ trong
+> container: `podman exec supervisor curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/login` -> `200`.
+
+### Bước 6. Trỏ domain trên Cloudflare
+
+Zero Trust -> Networks -> Tunnels -> tunnel của token -> Public Hostname -> thêm:
+
+| Field | Giá trị |
+|---|---|
+| Hostname | vd `code-188.aiai.io.vn` |
+| Service | `http://<IP container>:8080` (vd `http://172.16.7.188:8080`) |
+
+Dùng **IP container**, **không** dùng `localhost` (xem mục cloudflared). Kiểm tra:
+
+```bash
+curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' https://<hostname>/login   # 200, < 1s
+```
+
+### Bước 7. Ẩn container khỏi LAN (bật firewall)
+
+Tìm IP connector cloudflared đang gọi vào container: gọi domain vài lần rồi xem
+nguồn kết nối vào cổng 8080:
+
+```bash
+for i in 1 2 3; do curl -s -o /dev/null https://<hostname>/login; done
+nsenter -t $(podman inspect -f '{{.State.Pid}}' supervisor) -n ss -tn '( sport = :8080 )'
+```
+
+Cột `Peer Address` (bỏ phần `:port`) là IP connector, vd `172.16.7.73`.
+**Bỏ qua** dòng có Peer là chính IP container (đó là connector trong container).
+Không có dòng nào ngoài IP container -> chưa cần `LAN_ALLOW` cho máy khác, nhưng
+vẫn nên bật để ẩn: dùng IP connector thấy được ở lần gọi sau. Bật firewall:
+
+```bash
+sudo LAN_ALLOW="172.16.7.73" ./deploy.sh        # nhiều IP: "172.16.7.73 172.16.7.74"
+```
+
+Kiểm tra:
+
+```bash
+journalctl -u supervisor.service -n 30 --no-pager | grep 'lan-firewall:' | tail -1
+# lan-firewall: supervisor chi cho phep <gw>,172.16.7.73 -> tcp 8080
+curl -s -o /dev/null -w '%{http_code}\n' https://<hostname>/login                 # vẫn 200
+```
+
+Domain mất (502 sau ~30s) sau khi bật -> IP connector sai/thiếu: làm lại bước 7.
+
+### Cập nhật (sửa code, đổi version, thêm unit)
+
+```bash
+git pull
+sudo ./deploy.sh          # không cần truyền lại LAN_IP / LAN_ALLOW / LAN_PORTS
+```
+
+`deploy.sh` đọc lại IP, `LAN_ALLOW`, `LAN_PORTS` từ Quadlet đã render, nên IP
+và firewall **giữ nguyên**. Chỉ truyền biến khi muốn **đổi** giá trị.
+
+### Biến của `deploy.sh`
+
+| Biến / cờ | Mặc định | Ý nghĩa |
+|---|---|---|
+| `LAN_IP` | random `.180`-`.254` (lần đầu), sau đó giữ nguyên | IP LAN của container |
+| `LAN_ALLOW` | rỗng = firewall tắt | IP được gọi vào container (connector cloudflared) |
+| `LAN_PORTS` | `8080` | port mở cho `LAN_ALLOW`, vd `"8080 1111"` |
+| `--new-ip` | | random lại IP (phải sửa ingress Cloudflare sau đó) |
+
+### Lệnh vận hành
+
+```bash
+systemctl status supervisor.service
+systemctl restart supervisor.service
+systemctl stop supervisor.service              # dừng hẳn, không tự restart
+journalctl -u supervisor.service -f            # log host-side (start/stop, firewall)
+
+podman exec -it supervisor bash                # vào container
+podman exec supervisor systemctl --failed
+podman exec supervisor journalctl -u cloudflared -f
+podman exec supervisor journalctl -u code-server -f
+```
+
+### Lỗi thường gặp
+
+| Triệu chứng | Nguyên nhân | Cách sửa |
+|---|---|---|
+| domain **502** sau đúng ~30s | connector không tới được `IP:port` | kiểm tra ingress đúng IP container; IP connector có trong `LAN_ALLOW`; port có trong `LAN_PORTS` |
+| domain **530** / `error code: 1016` | hostname bị xoá hoặc DNS sai trên Cloudflare | sửa trên dashboard, không phải lỗi container |
+| domain **530** / `error code: 1033` | không connector nào của tunnel online | kiểm tra cloudflared trên các máy chạy tunnel |
+| `!! can chay bang root` | chạy không có sudo | chạy lại với `sudo` |
+| `!! khong tim duoc IP ...` | dải `.180`-`.254` đã kín | chọn tay `LAN_IP=<ip trống>` |
+| host `curl <IP container>` timeout | macvlan: host không gọi được container | bình thường, test bằng `podman exec` |
 
 ## Yêu cầu để systemd chạy trong container
 
@@ -79,7 +245,7 @@ Kết quả test từng biến thể:
 Tạo `units/<ten>.service`, rồi:
 
 ```bash
-./deploy.sh
+sudo ./deploy.sh
 podman exec supervisor systemctl enable --now <ten>
 ```
 
@@ -206,15 +372,12 @@ network namespace của container **từ host**:
 Container không có `CAP_NET_ADMIN` nên root trong container không gỡ được rule.
 `LAN_ALLOW`/`LAN_PORTS` đọc lại từ Quadlet nên chỉ cần truyền lần đầu.
 
-> Port khác trong container cũng vào được qua proxy của code-server mà không
-> cần mở firewall: `https://<domain code-server>/proxy/<port>/` (phải đăng nhập). Tìm IP connector:
-gọi domain rồi xem nguồn kết nối vào 8080:
-
-```bash
-nsenter -t $(podman inspect -f '{{.State.Pid}}' supervisor) -n ss -tn '( sport = :8080 )'
-```
+Tìm IP connector: xem bước 7 của "Deploy từng bước".
 
 > Connector cloudflared đổi máy -> domain lỗi cho tới khi thêm IP mới vào `LAN_ALLOW`.
+>
+> Port khác trong container cũng vào được qua proxy của code-server mà không
+> cần mở firewall: `https://<domain code-server>/proxy/<port>/` (phải đăng nhập).
 
 ## Healthcheck
 
