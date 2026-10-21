@@ -146,12 +146,17 @@ Hai chi tiết trong `units/cloudflared.service` (đã test):
 2. **`ConditionFileNotEmpty`, không `ConditionPathExists`.** File token rỗng ->
    unit bị skip sạch, không tính `failed`, systemd vẫn `running`.
 
-> **Tạo tunnel MỚI cho container.** Host đã chạy `cloudflared.service` riêng
-> (systemd của host). Dùng lại token đó = 2 replica cùng tunnel -> Cloudflare
-> chia traffic ngẫu nhiên giữa host và container -> routing thất thường.
+Ingress (hostname -> service) khai trên Cloudflare Zero Trust dashboard.
 
-Ingress (hostname -> service) khai trên Cloudflare Zero Trust dashboard; service
-đích viết theo góc nhìn trong container, vd `http://localhost:8080`.
+> **Tunnel dùng chung với connector ở máy khác** (cùng token) -> Cloudflare có
+> thể đẩy request vào **bất kỳ** connector nào, không nhất thiết connector trong
+> container. Vì vậy service đích phải là **IP LAN của container**, vd
+> `http://172.16.7.188:8080`, không phải `localhost` (`localhost` của connector
+> máy khác là chính máy đó). IP container phải nằm trong `LAN_ALLOW`/`LAN_PORTS`
+> của firewall (xem Network).
+>
+> Chỉ dùng `http://localhost:<port>` khi tunnel là **riêng** của container
+> (connector duy nhất chạy trong container).
 
 ## Network
 

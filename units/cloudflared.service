@@ -1,8 +1,7 @@
 # Tunnel đọc token từ /etc/cloudflared/token (mount từ host, xem quadlet/supervisor.container.in).
-# KHÔNG enable sẵn trong image — cần có token trước:
-#   echo -n '<TOKEN>' > secrets/token && chmod 600 secrets/token
-#   ./deploy.sh
-#   podman exec supervisor systemctl enable --now cloudflared
+# Enable sẵn trong image; chưa có token thì ConditionFileNotEmpty skip sạch. Thêm token:
+#   printf '%s' '<TOKEN>' > secrets/token && chmod 600 secrets/token
+#   podman exec supervisor systemctl restart cloudflared
 [Unit]
 Description=Cloudflare Tunnel
 After=network-online.target
