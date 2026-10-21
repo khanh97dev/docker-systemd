@@ -98,7 +98,9 @@ IP tren lan: 172.16.7.188
 
 ### Chọn IP container (viết tắt)
 
-IP container **luôn** có dạng `172.16.7.<n>`. Người dùng chỉ cần nói số cuối:
+IP container **luôn** có dạng `<3 số đầu IP của server đang deploy>.<n>`
+(server `172.16.7.38` -> `172.16.7.<n>`; server `172.25.57.x` -> `172.25.57.<n>`).
+Người dùng chỉ cần nói số cuối. Ví dụ trên server `172.16.7.38`:
 
 | Người dùng nói | Lệnh chạy | IP container |
 |---|---|---|
@@ -110,7 +112,8 @@ IP container **luôn** có dạng `172.16.7.<n>`. Người dùng chỉ cần nó
 
 - `n` phải từ `2` đến `254`, IP phải đang trống. Sai -> script báo `!! ...` và
   dừng (exit 1), container **không** bị đụng tới.
-- IP khác dải `172.16.7.x` bị từ chối. Đổi dải: `LAN_PREFIX=a.b.c`.
+- IP khác dải của server bị từ chối. Đổi dải: `LAN_PREFIX=a.b.c`.
+- Xem dải của server: `ip -4 route get 1.1.1.1` -> phần `src a.b.c.d`, dải là `a.b.c`.
 - **Đổi IP thì phải sửa ingress trên Cloudflare** sang IP mới (bước 6), và
   domain dùng IP cũ sẽ hỏng cho tới lúc đó.
 
@@ -193,7 +196,7 @@ và firewall **giữ nguyên**. Chỉ truyền biến khi muốn **đổi** giá
 | Biến / cờ | Mặc định | Ý nghĩa |
 |---|---|---|
 | tham số 1 / `LAN_IP` | random `.180`-`.254` (lần đầu), sau đó giữ nguyên | IP container: `.199`, `199` hoặc `172.16.7.199` |
-| `LAN_PREFIX` | `172.16.7` | 3 số đầu IP container |
+| `LAN_PREFIX` | 3 số đầu IP của server | 3 số đầu IP container |
 | `LAN_ALLOW` | rỗng = firewall tắt | IP được gọi vào container (connector cloudflared) |
 | `LAN_PORTS` | `8080` | port mở cho `LAN_ALLOW`, vd `"8080 1111"` |
 | `--new-ip` | | random lại IP (phải sửa ingress Cloudflare sau đó) |
@@ -221,7 +224,7 @@ podman exec supervisor journalctl -u code-server -f
 | domain **530** / `error code: 1033` | không connector nào của tunnel online | kiểm tra cloudflared trên các máy chạy tunnel |
 | `!! can chay bang root` | chạy không có sudo | chạy lại với `sudo` |
 | `!! khong tim duoc IP ...` | dải `.180`-`.254` đã kín | chọn tay: `sudo ./deploy.sh .<n trống>` |
-| `!! IP khong hop le` / `khong thuoc 172.16.7.x` | IP gõ sai | dùng dạng `.199`, `199` hoặc `172.16.7.199` |
+| `!! IP khong hop le` / `khong thuoc a.b.c.x` | IP gõ sai hoặc khác dải server | dùng dạng `.199` hoặc `199` |
 | `!! ... dang co may khac dung` | IP đã có máy dùng | chọn số khác |
 | host `curl <IP container>` timeout | macvlan: host không gọi được container | bình thường, test bằng `podman exec` |
 

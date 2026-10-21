@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Build image + (re)start container supervisor bang podman ROOTFUL (Quadlet).
 # Phai chay bang root:
-#   sudo ./deploy.sh                          # lan dau: random 172.16.7.180-254
-#   sudo ./deploy.sh .199                     # chon IP 172.16.7.199 (= 199 = 172.16.7.199)
+#   sudo ./deploy.sh                          # lan dau: random <3 so dau IP host>.180-254
+#   sudo ./deploy.sh .199                     # chon IP <3 so dau IP host>.199 (= 199)
 #   sudo ./deploy.sh --new-ip                 # random lai IP
-#   sudo LAN_IP=.199 ./deploy.sh              # giong ./deploy.sh .199 (LAN_PREFIX=172.16.7 mac dinh)
+#   sudo LAN_IP=.199 ./deploy.sh              # giong ./deploy.sh .199
 #   sudo LAN_ALLOW="172.16.7.73" ./deploy.sh  # IP connector cloudflared duoc goi vao
 #   sudo LAN_PORTS="8080 1111" ./deploy.sh    # port mo cho LAN_ALLOW (mac dinh 8080)
 # Bien chi can truyen khi muon DOI: lan sau doc lai tu Quadlet da render.
@@ -38,8 +38,13 @@ QUADLET_DIR=/etc/containers/systemd
 QUADLET="$QUADLET_DIR/supervisor.container"
 IP_MIN=180
 IP_MAX=254
-# 3 so dau IP container. ".199" / "199" -> "$LAN_PREFIX.199".
-LAN_PREFIX=${LAN_PREFIX:-172.16.7}
+DEV=$(ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+GW=$(ip -4 route show default dev "$DEV" | awk '{print $3; exit}')
+SUBNET=$(ip -4 route show dev "$DEV" scope link proto kernel | awk '{print $1; exit}')
+HOST_IP=$(ip -4 -o addr show dev "$DEV" | awk '{split($4, a, "/"); print a[1]; exit}')
+# 3 so dau IP container = 3 so dau IP cua chinh server nay (vd host 172.16.7.38
+# -> 172.16.7, host 172.25.57.10 -> 172.25.57). ".199" / "199" -> "$LAN_PREFIX.199".
+LAN_PREFIX=${LAN_PREFIX:-${HOST_IP%.*}}
 
 # Tham so: --new-ip, hoac IP (.199 / 199 / 172.16.7.199).
 NEW_IP=
@@ -64,10 +69,6 @@ case "${LAN_IP:-}" in
   *) echo "!! $LAN_IP khong thuoc $LAN_PREFIX.x (doi dai: LAN_PREFIX=a.b.c)" >&2; exit 1 ;;
 esac
 
-DEV=$(ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i+1); exit}}')
-GW=$(ip -4 route show default dev "$DEV" | awk '{print $3; exit}')
-SUBNET=$(ip -4 route show dev "$DEV" scope link proto kernel | awk '{print $1; exit}')
-HOST_IP=$(ip -4 -o addr show dev "$DEV" | awk '{split($4, a, "/"); print a[1]; exit}')
 
 # 0 neu IP dang co may dung (tra loi ping hoac ARP).
 ip_in_use() {
